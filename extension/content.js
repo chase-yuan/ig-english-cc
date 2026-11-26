@@ -325,7 +325,7 @@
         videoKey: resolved.videoKey,
       });
       if (!res || !res.ok) {
-        throw new Error((res && res.error) || "Local server unreachable (127.0.0.1:18795)");
+        throw new Error((res && res.error) || "Transcription failed. Click the IG English CC icon to check your Groq API key.");
       }
       setBounded(subtitleCache, resolved.videoKey, res);
       state.data = res;

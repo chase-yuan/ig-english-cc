@@ -1,9 +1,0 @@
-{
-  "host": "127.0.0.1",
-  "port": 18795,
-  "groq_keys_path": "~/.config/groq/keys.json",
-  "groq_model": "whisper-large-v3-turbo",
-  "language": "en",
-  "ffmpeg_bin": "ffmpeg",
-  "cache_dir": "./_cache"
-}

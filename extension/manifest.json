@@ -1,15 +1,19 @@
 {
   "manifest_version": 3,
   "name": "IG English CC",
-  "version": "1.0.0",
-  "description": "YouTube-style pure English subtitles and one-click SRT download for Instagram (powered by local Groq Whisper).",
-  "permissions": [],
+  "version": "2.0.0",
+  "description": "Zero-backend YouTube-style pure English subtitles & one-click TXT download for Instagram Web (powered directly by your own free Groq Whisper API key).",
+  "permissions": ["storage"],
   "host_permissions": [
     "https://www.instagram.com/*",
     "https://*.cdninstagram.com/*",
     "https://*.fbcdn.net/*",
-    "http://127.0.0.1:18795/*"
+    "https://api.groq.com/*"
   ],
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "IG English CC"
+  },
   "background": {
     "service_worker": "background.js"
   },

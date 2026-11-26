@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>IG English CC</title>
+  <style>
+    body {
+      width: 310px;
+      margin: 0;
+      padding: 14px;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: #141414;
+      color: #f2f2f2;
+      font-size: 13px;
+    }
+    h1 {
+      margin: 0 0 6px;
+      font-size: 15px;
+      font-weight: 700;
+    }
+    p {
+      margin: 0 0 10px;
+      color: #a8a8a8;
+      line-height: 1.4;
+      font-size: 12px;
+    }
+    a {
+      color: #60a5fa;
+      text-decoration: none;
+    }
+    a:hover {
+      text-decoration: underline;
+    }
+    textarea {
+      width: 100%;
+      box-sizing: border-box;
+      height: 76px;
+      padding: 8px;
+      border-radius: 6px;
+      border: 1px solid #333;
+      background: #1f1f1f;
+      color: #fff;
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 12px;
+      resize: vertical;
+    }
+    .row {
+      display: flex;
+      gap: 8px;
+      margin-top: 10px;
+    }
+    button {
+      flex: 1;
+      padding: 8px 10px;
+      border: 0;
+      border-radius: 6px;
+      font-weight: 600;
+      font-size: 12px;
+      cursor: pointer;
+    }
+    #saveBtn {
+      background: #ffffff;
+      color: #111111;
+    }
+    #clearCacheBtn {
+      background: #2a2a2a;
+      color: #d4d4d4;
+      flex: 0 0 auto;
+    }
+    #status {
+      margin-top: 8px;
+      min-height: 16px;
+      font-size: 12px;
+      color: #4ade80;
+    }
+  </style>
+</head>
+<body>
+  <h1>IG English CC</h1>
+  <p>
+    Paste your free <a href="https://console.groq.com/keys" target="_blank" rel="noreferrer">Groq API key</a> (one per line for auto-rotation). Stored locally in your browser only.
+  </p>
+  <textarea id="keysInput" placeholder="gsk_..."></textarea>
+  <div class="row">
+    <button id="saveBtn" type="button">Save Key</button>
+    <button id="clearCacheBtn" type="button">Clear Cache</button>
+  </div>
+  <div id="status"></div>
+  <script src="popup.js"></script>
+</body>
+</html>
