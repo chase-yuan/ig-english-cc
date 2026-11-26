@@ -1,18 +1,24 @@
-# Chrome Web Store Submission Pack — English CC for Instagram
+# Microsoft Edge Add-ons Submission Pack — English CC for Instagram
 
-直接按下面字段复制到 Chrome Web Store 开发者后台即可（已避开所有商标与权限审核红线）。
+**完全免费上架（无需外币信用卡）**。打开 [Microsoft Partner Center — Edge 扩展后台](https://partner.microsoft.com/dashboard/microsoftedge/overview)，按下面步骤直接复制粘贴即可：
 
 ---
 
-## 1. Store Listing (商店展示信息)
-- **Name**: `English CC for Instagram`
-- **Summary (≤ 132 chars)**: `YouTube-style pure English subtitles and one-click TXT transcript export for Instagram Web (bring your own free Groq API key).`
-- **Category**: `Education` (或 `Productivity`)
-- **Language**: `English`
-- **Privacy Policy URL**: `https://github.com/chase-yuan/ig-english-cc/blob/main/PRIVACY.md`
-- **Homepage / Support URL**: `https://github.com/chase-yuan/ig-english-cc`
+## Step 1: 上传扩展包 (Packages)
+- 直接上传本地文件：`dist/english-cc-for-instagram-v2.0.0.zip`（同一个包，Edge 原生兼容 Manifest V3）
 
-### Detailed Description
+---
+
+## Step 2: 商店信息 (Store listings — English)
+- **Display Name**: `English CC for Instagram`
+- **Short Description (≤ 132 chars)**: `YouTube-style pure English subtitles and one-click TXT transcript export for Instagram Web (bring your own free Groq API key).`
+- **Category**: `Education`（或 `Productivity`）
+- **Store Logo (300×300 PNG)**: 上传 `store-assets/edge_store_logo_300x300.png`
+- **Screenshot (1280×800 PNG)**: 上传 `store-assets/promo_1280x800.png`
+- **Privacy Policy URL**: `https://github.com/chase-yuan/ig-english-cc/blob/main/PRIVACY.md`
+- **Website URL**: `https://github.com/chase-yuan/ig-english-cc`
+
+### Description
 ```text
 English CC for Instagram adds clean, YouTube-style pure English closed captions and one-click plain-text transcript export to Instagram Web — built specifically for English learners.
 
@@ -23,7 +29,7 @@ KEY FEATURES
 • Zero Subscription & Zero Backend: Bring your own free Groq API key (Whisper large-v3-turbo). Supports multiple keys with automatic rotation and local caching.
 
 HOW TO USE (30 SECONDS)
-1. Install the extension.
+1. Install the extension from Microsoft Edge Add-ons.
 2. Click the extension icon in your toolbar and paste a free Groq API key from console.groq.com/keys.
 3. Open Instagram, play a video, and click "CC" or press "C".
 
@@ -35,19 +41,20 @@ Disclaimer: Independent language-learning tool. Not affiliated with or endorsed 
 
 ---
 
-## 2. Privacy Practices / Permission Justifications (审核必填理由)
+## Step 3: 审核备注 (Notes for certification — 极大提高一次过审率)
+直接把下面这段粘进 Edge 提交页底部的 **Notes for certification**：
 
-- **Single Purpose Description**:
-  `Generates selectable, time-synced pure English subtitles and exports plain-text transcripts for Instagram Web videos to assist English language learners.`
+```text
+This is a zero-backend, BYOK (Bring Your Own Key) English language-learning extension for Instagram Web.
 
-- **`storage` permission**:
-  `Used exclusively to store the user's own Groq API key(s) and a local bounded cache (max 100 items) of generated subtitles in chrome.storage.local.`
+How to test:
+1. Click the extension toolbar icon and paste any free Groq API key (https://console.groq.com/keys), then click Save Key.
+2. Open any public Instagram Reel (e.g., https://www.instagram.com/reels/).
+3. Click the "CC" button at the top-right of the video (or press "C") to display time-synced pure English captions, or click "⬇" to export a plain-text .txt transcript.
 
-- **Host permissions (`https://www.instagram.com/*`, `https://*.cdninstagram.com/*`, `https://*.fbcdn.net/*`, `https://api.groq.com/*`)**:
-  `instagram.com is required to render the CC/download buttons and selectable subtitle overlay on videos. cdninstagram.com and fbcdn.net are required strictly to read the active video's audio stream when the user clicks CC or download. api.groq.com is required to send that audio directly to Groq Whisper using the user's own API key.`
-
-- **Remote code**: `No, I am not using Remote code.`
-
-- **Data Usage disclosures**:
-  - Check **none** of the personal data collection checkboxes (zero developer collection).
-  - Certify the 3 compliance checkboxes at the bottom.
+Permission justification:
+- storage: Stores the user's own Groq API key(s) and a bounded 100-item local subtitle cache in chrome.storage.local only.
+- instagram.com: Renders the CC/download buttons and selectable subtitle overlay.
+- cdninstagram.com / fbcdn.net: Strictly reads the active video's audio stream when the user clicks CC or download.
+- api.groq.com: Sends that audio stream directly to Groq Whisper using the user's own API key. No developer server or analytics are used.
+```
