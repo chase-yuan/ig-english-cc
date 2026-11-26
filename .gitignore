@@ -4,3 +4,4 @@ server.log
 server.err
 __pycache__/
 .DS_Store
+dist/

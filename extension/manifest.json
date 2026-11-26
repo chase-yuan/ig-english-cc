@@ -1,8 +1,13 @@
 {
   "manifest_version": 3,
-  "name": "IG English CC",
+  "name": "English CC for Instagram",
   "version": "2.0.0",
-  "description": "Zero-backend YouTube-style pure English subtitles & one-click TXT download for Instagram Web (powered directly by your own free Groq Whisper API key).",
+  "description": "YouTube-style pure English subtitles & one-click TXT transcript export for Instagram Web (bring your own free Groq API key).",
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
   "permissions": ["storage"],
   "host_permissions": [
     "https://www.instagram.com/*",
@@ -12,7 +17,12 @@
   ],
   "action": {
     "default_popup": "popup.html",
-    "default_title": "IG English CC"
+    "default_title": "English CC for Instagram",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
   },
   "background": {
     "service_worker": "background.js"
