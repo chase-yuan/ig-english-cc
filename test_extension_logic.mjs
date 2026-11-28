@@ -201,7 +201,7 @@ const EXT = path.join(__dirname, "extension");
   const audioUtilsCode = fs.readFileSync(path.join(EXT, "audio_utils.js"), "utf8");
   const offscreenCode = fs.readFileSync(path.join(EXT, "offscreen.js"), "utf8");
 
-  const store = { groqKeys: [], subtitleCacheV2: {} };
+  const store = { groqKeys: [], subtitleCacheV3: {} };
   let bgListener = null;
   let offscreenListener = null;
   let offscreenCreatedCount = 0;
@@ -510,12 +510,22 @@ const EXT = path.join(__dirname, "extension");
   assert.equal(api.shortcodeMap.has("SC_BOUND_0"), false);
   assert.equal(api.shortcodeMap.has("SC_BOUND_249"), true);
 
-  // Likes / Activity modal scenario: no /reel/CODE in URL, blob: video src, resolved via live CDN sniff
+  // Anti-ad-hijack test: when a shortcode exists without manifest, default resolveCandidates MUST NOT grab background-prefetched CDN ads!
+  loc.pathname = "/reels/REEL_UNSEEN/";
+  const unseenVideo = { currentSrc: "blob:https://www.instagram.com/unseen-vid", parentElement: null };
+  api.recordCdnSniff("https://scontent.cdninstagram.com/sponsored_vpn_ad.mp4", "audio", "/reels/REEL_UNSEEN/", Date.now());
+  assert.equal(
+    api.resolveCandidates(unseenVideo),
+    null,
+    "Must NOT hijack a known-shortcode video with a background-prefetched ad from pathnameCdnMap"
+  );
+
+  // Anonymous Likes / Activity modal scenario (no shortcode anywhere): allowPathSniff=true resolves via live CDN sniff
   loc.pathname = "/your_activity/interactions/likes/";
   const likesVideo = { currentSrc: "blob:https://www.instagram.com/likes-vid", parentElement: null };
   api.recordCdnSniff("https://scontent.cdninstagram.com/live_likes_audio.mp4?bytestart=0&byteend=4096", "audio", "/your_activity/interactions/likes/", Date.now());
-  const likesResolved = api.resolveCandidates(likesVideo);
-  assert.ok(likesResolved, "Likes modal video must resolve via live CDN audio sniff");
+  const likesResolved = api.resolveCandidates(likesVideo, { allowPathSniff: true });
+  assert.ok(likesResolved, "Anonymous Likes modal video must resolve via live CDN audio sniff when allowPathSniff=true");
   assert.equal(likesResolved.candidates[0], "https://scontent.cdninstagram.com/live_likes_audio.mp4");
-  console.log("[PASS] 4. content.js: React <video> reuse isolation, bounded FIFO cache & Likes/Activity modal CDN fallback verified");
+  console.log("[PASS] 4. content.js: React <video> reuse isolation, anti-ad-hijack & Likes/Activity modal fallback verified");
 }

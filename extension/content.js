@@ -131,7 +131,7 @@
     return `path:${location.pathname || "/"}`;
   }
 
-  function resolveCandidates(video) {
+  function resolveCandidates(video, { allowPathSniff = false } = {}) {
     const shortcode = extractShortcodeFromVideo(video);
     const ordered = [];
     const seen = new Set();
@@ -155,8 +155,9 @@
       push(cleanUrl(directSrc));
     }
 
-    // Priority 3: Live CDN audio streams sniffed on this exact pathname (Likes / Activity / Saved modals)
-    if (ordered.length === 0) {
+    // Priority 3: Live CDN audio sniff ONLY when explicitly allowed (never preempting exact shortcode fetch,
+    // because Instagram prefetches sponsored ads in the background on the same pathname!)
+    if (ordered.length === 0 && allowPathSniff) {
       const pathList = pathnameCdnMap.get(location.pathname || "/") || [];
       pathList.filter((e) => e.kind === "audio").forEach((e) => push(e.url));
       pathList.filter((e) => e.kind !== "audio").forEach((e) => push(e.url));
@@ -170,52 +171,139 @@
     };
   }
 
-  // Last-resort same-origin page fetch when opened directly from Likes / Activity without preloaded manifest
-  async function fetchShortcodeFallback(shortcode) {
-    if (!shortcode || typeof fetch !== "function") return [];
-    const urls = [];
-    const seen = new Set();
-    const push = (u) => {
-      if (!u || seen.has(u)) return;
-      seen.add(u);
-      urls.push(cleanUrl(u));
-    };
-
-    try {
-      const resp = await fetch(`${location.origin}/p/${shortcode}/`, { credentials: "same-origin" });
-      if (!resp.ok) return [];
-      const html = await resp.text();
-      const unescaped = html
-        .replace(/\\u003C/gi, "<")
-        .replace(/\\u003E/gi, ">")
-        .replace(/\\u0026/gi, "&")
-        .replace(/\\\//g, "/")
-        .replace(/&amp;/g, "&");
-
-      // Prefer audio AdaptationSets from embedded DASH XML
-      const setRe = /<AdaptationSet([^>]*)>([\s\S]*?)<\/AdaptationSet>/gi;
-      let m;
-      while ((m = setRe.exec(unescaped)) !== null) {
-        const attrs = m[1] || "";
-        const body = m[2] || "";
-        if (/contentType=["']video["']|mimeType=["']video\//i.test(attrs)) continue;
-        if (!/contentType=["']audio["']|mimeType=["']audio\/|codecs=["']mp4a/i.test(attrs + " " + body)) continue;
+  function extractAudioFromDashXml(manifestStr) {
+    if (!manifestStr || typeof manifestStr !== "string") return [];
+    const xml = manifestStr
+      .replace(/\\u003C/gi, "<")
+      .replace(/\\u003E/gi, ">")
+      .replace(/\\u0026/gi, "&")
+      .replace(/\\\//g, "/")
+      .replace(/&amp;/g, "&");
+    const found = [];
+    const setRe = /<AdaptationSet([^>]*)>([\s\S]*?)<\/AdaptationSet>/gi;
+    let m;
+    while ((m = setRe.exec(xml)) !== null) {
+      const attrs = m[1] || "";
+      const body = m[2] || "";
+      if (/contentType=["']video["']|mimeType=["']video\//i.test(attrs)) continue;
+      if (!/contentType=["']audio["']|mimeType=["']audio\/|codecs=["']mp4a/i.test(attrs + " " + body)) continue;
+      const repRe = /<Representation([^>]*)>([\s\S]*?)<\/Representation>/gi;
+      let rm;
+      let matchedRep = false;
+      while ((rm = repRe.exec(body)) !== null) {
+        const repAttrs = rm[1] || "";
+        const repBody = rm[2] || "";
+        if (/mimeType=["']video\//i.test(repAttrs)) continue;
+        const bwMatch = repAttrs.match(/bandwidth=["'](\d+)["']/i);
+        const bandwidth = bwMatch ? Number(bwMatch[1]) : Number.MAX_SAFE_INTEGER;
+        const baseRe = /<BaseURL[^>]*>(https?:\/\/[^<]+)<\/BaseURL>/gi;
+        let bm;
+        while ((bm = baseRe.exec(repBody)) !== null) {
+          found.push({ url: cleanUrl(bm[1].trim()), bandwidth });
+          matchedRep = true;
+        }
+      }
+      if (!matchedRep) {
         const baseRe = /<BaseURL[^>]*>(https?:\/\/[^<]+)<\/BaseURL>/gi;
         let bm;
         while ((bm = baseRe.exec(body)) !== null) {
-          push(bm[1].trim());
-          recordMedia(bm[1].trim(), "audio", shortcode);
+          found.push({ url: cleanUrl(bm[1].trim()), bandwidth: Number.MAX_SAFE_INTEGER });
         }
       }
-      // Fallback: video_url in embedded JSON
-      const vUrlRe = /"video_url"\s*:\s*"(https?:\/\/[^"]+)"/gi;
-      let vm;
-      while ((vm = vUrlRe.exec(unescaped)) !== null) {
-        push(vm[1]);
-        recordMedia(vm[1], "muxed", shortcode);
+    }
+    found.sort((a, b) => a.bandwidth - b.bandwidth);
+    return found.map((x) => x.url);
+  }
+
+  function extractExactShortcodeFromJson(node, targetCode, outAudio, outMuxed, depth = 0, inheritedCode = null) {
+    if (!node || typeof node !== "object" || depth > 25) return;
+    if (Array.isArray(node)) {
+      for (let i = 0; i < node.length; i++) {
+        extractExactShortcodeFromJson(node[i], targetCode, outAudio, outMuxed, depth + 1, inheritedCode);
       }
-    } catch {}
-    return urls;
+      return;
+    }
+    const ownCode =
+      (typeof node.code === "string" && node.code.length >= 6 && node.code.length <= 24 && node.code) ||
+      (typeof node.shortcode === "string" && node.shortcode.length >= 6 && node.shortcode.length <= 24 && node.shortcode) ||
+      null;
+    const activeCode = ownCode || inheritedCode;
+
+    if (activeCode === targetCode) {
+      const dash =
+        node.video_dash_manifest ||
+        node.dash_manifest ||
+        (node.dash_info && (node.dash_info.video_dash_manifest || node.dash_info.dash_manifest));
+      if (typeof dash === "string" && dash.includes("BaseURL")) {
+        for (const u of extractAudioFromDashXml(dash)) outAudio.push(u);
+      }
+      if (Array.isArray(node.video_versions)) {
+        const sorted = [...node.video_versions].sort((a, b) => {
+          const areaA = (Number(a && a.width) || 9999) * (Number(a && a.height) || 9999);
+          const areaB = (Number(b && b.width) || 9999) * (Number(b && b.height) || 9999);
+          return areaA - areaB;
+        });
+        for (const v of sorted) {
+          if (v && typeof v.url === "string" && v.url.startsWith("http")) {
+            outMuxed.push(cleanUrl(v.url));
+          }
+        }
+      }
+      if (typeof node.video_url === "string" && node.video_url.startsWith("http")) {
+        outMuxed.push(cleanUrl(node.video_url));
+      }
+    }
+
+    for (const key of Object.keys(node)) {
+      const val = node[key];
+      if (val && typeof val === "object") {
+        extractExactShortcodeFromJson(val, targetCode, outAudio, outMuxed, depth + 1, activeCode);
+      }
+    }
+  }
+
+  // Exact same-origin fetch when opened from Likes / Activity without preloaded manifest (strictly filters by shortcode!)
+  async function fetchShortcodeFallback(shortcode) {
+    if (!shortcode || typeof fetch !== "function") return [];
+    const outAudio = [];
+    const outMuxed = [];
+
+    for (const pathPrefix of ["p", "reel"]) {
+      try {
+        const resp = await fetch(`${location.origin}/${pathPrefix}/${shortcode}/`, { credentials: "same-origin" });
+        if (!resp.ok) continue;
+        const html = await resp.text();
+        const scriptRe = /<script[^>]*type=["']application\/json["'][^>]*>([\s\S]*?)<\/script>/gi;
+        let sm;
+        while ((sm = scriptRe.exec(html)) !== null) {
+          const raw = sm[1];
+          if (!raw || !raw.includes(shortcode)) continue;
+          try {
+            const parsed = JSON.parse(raw);
+            extractExactShortcodeFromJson(parsed, shortcode, outAudio, outMuxed, 0, null);
+          } catch {}
+        }
+        if (outAudio.length > 0 || outMuxed.length > 0) break;
+      } catch {}
+    }
+
+    const seen = new Set();
+    const ordered = [];
+    for (const u of outAudio) {
+      if (!seen.has(u)) {
+        seen.add(u);
+        ordered.push(u);
+        recordMedia(u, "audio", shortcode);
+      }
+    }
+    for (const u of outMuxed) {
+      if (!seen.has(u)) {
+        seen.add(u);
+        ordered.push(u);
+        recordMedia(u, "muxed", shortcode);
+      }
+    }
+    return ordered;
   }
 
   function getKeyState(videoKey) {
@@ -395,7 +483,10 @@
   }
 
   async function ensureTranscribed(video) {
-    let resolved = resolveCandidates(video);
+    // 1. Try exact shortcode / direct HTTP binding first (never let background-prefetched ads hijack it)
+    let resolved = resolveCandidates(video, { allowPathSniff: false });
+
+    // 2. If we have a shortcode (e.g. Likes / Activity modal), fetch that exact post's manifest directly
     if (!resolved) {
       const fallbackCode = extractShortcodeFromVideo(video);
       if (fallbackCode) {
@@ -410,6 +501,12 @@
         }
       }
     }
+
+    // 3. Only if no shortcode exists at all (anonymous modal video), fall back to live CDN audio sniff
+    if (!resolved && !extractShortcodeFromVideo(video)) {
+      resolved = resolveCandidates(video, { allowPathSniff: true });
+    }
+
     if (!resolved) {
       throw new Error("Could not bind this video's audio stream yet. Play the video for 1 second or refresh once, then click CC.");
     }

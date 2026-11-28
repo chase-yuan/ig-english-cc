@@ -59,17 +59,17 @@ async function getGroqKeys() {
 
 async function getCachedSubtitle(videoKey) {
   if (!videoKey) return null;
-  const { subtitleCacheV2 } = await storageGet(["subtitleCacheV2"]);
-  if (subtitleCacheV2 && subtitleCacheV2[videoKey]) {
-    return { ...subtitleCacheV2[videoKey], cached: true };
+  const { subtitleCacheV3 } = await storageGet(["subtitleCacheV3"]);
+  if (subtitleCacheV3 && subtitleCacheV3[videoKey]) {
+    return { ...subtitleCacheV3[videoKey], cached: true };
   }
   return null;
 }
 
 async function saveCachedSubtitle(videoKey, result) {
   if (!videoKey) return;
-  const { subtitleCacheV2 } = await storageGet(["subtitleCacheV2"]);
-  const cache = subtitleCacheV2 && typeof subtitleCacheV2 === "object" ? { ...subtitleCacheV2 } : {};
+  const { subtitleCacheV3 } = await storageGet(["subtitleCacheV3"]);
+  const cache = subtitleCacheV3 && typeof subtitleCacheV3 === "object" ? { ...subtitleCacheV3 } : {};
   delete cache[videoKey];
   cache[videoKey] = result;
   const keys = Object.keys(cache);
@@ -77,7 +77,7 @@ async function saveCachedSubtitle(videoKey, result) {
     const oldest = keys.shift();
     delete cache[oldest];
   }
-  await storageSet({ subtitleCacheV2: cache });
+  await storageSet({ subtitleCacheV3: cache });
 }
 
 async function callGroqWhisper(audioBuf, keys) {
@@ -180,6 +180,12 @@ async function transcribeOversizedViaOffscreen(mediaUrl, keys) {
 
 function buildFinalResult(videoKey, fullText, rawSegments) {
   let segments = (Array.isArray(rawSegments) ? rawSegments : [])
+    .filter((s) => {
+      // Filter Whisper silence/music hallucinations (high no_speech_prob)
+      const nsp = Number(s && s.no_speech_prob);
+      if (Number.isFinite(nsp) && nsp > 0.85) return false;
+      return true;
+    })
     .map((s) => ({
       start: Math.round(Number(s.start || 0) * 1000) / 1000,
       end: Math.round(Number(s.end || 0) * 1000) / 1000,
@@ -187,7 +193,7 @@ function buildFinalResult(videoKey, fullText, rawSegments) {
     }))
     .filter((s) => s.text);
 
-  const cleanedText = String(fullText || "").trim();
+  const cleanedText = segments.length > 0 ? segments.map((s) => s.text).join(" ") : String(fullText || "").trim();
   if (segments.length === 0 && cleanedText) {
     segments = [{ start: 0, end: 5, text: cleanedText }];
   }
