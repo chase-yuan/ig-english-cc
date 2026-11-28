@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "English CC for Instagram",
-  "version": "2.2.1",
-  "description": "YouTube-style pure English subtitles, one-click TXT export & AI C1/C2 vocabulary / Anki card mining for Instagram Web.",
+  "version": "2.1.3",
+  "description": "YouTube-style pure English subtitles & one-click TXT transcript export for Instagram Web (bring your own free Groq API key).",
   "icons": {
     "16": "icons/icon16.png",
     "48": "icons/icon48.png",
@@ -13,8 +13,7 @@
     "https://www.instagram.com/*",
     "https://*.cdninstagram.com/*",
     "https://*.fbcdn.net/*",
-    "https://api.groq.com/*",
-    "https://generativelanguage.googleapis.com/*"
+    "https://api.groq.com/*"
   ],
   "action": {
     "default_popup": "popup.html",

@@ -5,7 +5,7 @@
 ---
 
 ## Step 1: 上传扩展包 (Packages)
-- 直接上传本地文件：`dist/english-cc-for-instagram-v2.2.1.zip`（同一个包，Edge 原生兼容 Manifest V3）
+- 直接上传本地文件：`dist/english-cc-for-instagram-v2.1.3.zip`（同一个包，Edge 原生兼容 Manifest V3）
 
 ---
 
@@ -57,6 +57,5 @@ Permission justification:
 - offscreen: Used strictly as an automatic fallback for large videos (>24 MB) to decode the audio track via Web Audio API into 16 kHz mono WAV chunks under Groq's 25 MB upload limit.
 - instagram.com: Renders the CC/download buttons and selectable subtitle overlay.
 - cdninstagram.com / fbcdn.net: Strictly reads the active video's audio stream when the user clicks CC or download.
-- api.groq.com: Sends the audio stream directly to Groq Whisper (and optional LLM fallback) using the user's own API key. No developer server or analytics are used.
-- generativelanguage.googleapis.com: Optional BYOK Gemini API call when the user clicks the "AI" study card button to explain C1/C2 phrases and generate Anki CSV cards.
+- api.groq.com: Sends that audio stream directly to Groq Whisper using the user's own API key. No developer server or analytics are used.
 ```

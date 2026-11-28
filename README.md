@@ -1,8 +1,8 @@
-# IG English CC (v2.2 — Zero-Backend Subtitles + AI Study Cards)
+# IG English CC (v2.1 — Zero-Backend Pure Extension)
 
-> **YouTube-style pure English subtitles, one-click `.txt` export, and side-panel C1/C2 phrase & Anki card mining for Instagram Web (Edge / Chrome).**
+> **YouTube-style pure English subtitles & one-click `.txt` transcript download for Instagram Web (Edge / Chrome).**
 >
-> **Zero Python. Zero `ffmpeg`. Zero local server.** Just load the `extension/` folder, paste a free Groq key (plus optional free Gemini API key for AI study cards), and learn directly while watching Instagram.
+> **Zero Python. Zero `ffmpeg`. Zero local server.** Just load the `extension/` folder, paste one free Groq API key, and start watching Instagram with selectable English subtitles — including large/long videos (>24 MB) via automatic in-browser 16 kHz WAV extraction & chunking.
 
 ---
 
