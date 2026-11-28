@@ -108,23 +108,72 @@
     window.postMessage({ type: "IG_CC_MEDIA", ...payload }, "*");
   }
 
-  // Recursively walk parsed JSON tree so each media item's audio URL is strictly bound to its OWN shortcode.
-  function walkJsonForMedia(node, depth = 0) {
+  function classifyCdnUrl(rawUrl) {
+    try {
+      const u = new URL(rawUrl, location.href);
+      const host = u.hostname.toLowerCase();
+      if (!host.endsWith(".cdninstagram.com") && !host.endsWith(".fbcdn.net")) return null;
+      const efg = u.searchParams.get("efg");
+      if (efg) {
+        try {
+          const decoded = atob(efg.replace(/-/g, "+").replace(/_/g, "/")).toLowerCase();
+          if (decoded.includes("audio")) return { url: cleanByteRange(rawUrl), kind: "audio" };
+          if (
+            decoded.includes("video") ||
+            decoded.includes("vp9") ||
+            decoded.includes("av1") ||
+            decoded.includes("h264") ||
+            decoded.includes("hevc") ||
+            decoded.includes("dash_vp") ||
+            decoded.includes("dash_h264")
+          ) {
+            return null; // Ignore silent video-only DASH tracks
+          }
+        } catch {}
+      }
+      const pathLower = u.pathname.toLowerCase();
+      if (pathLower.endsWith(".mp4") || pathLower.endsWith(".m4a") || u.searchParams.has("bytestart")) {
+        return { url: cleanByteRange(rawUrl), kind: "muxed" };
+      }
+      return null;
+    } catch {
+      return null;
+    }
+  }
+
+  function sniffCdnUrl(rawUrl) {
+    const info = classifyCdnUrl(rawUrl);
+    if (!info) return;
+    window.postMessage(
+      {
+        type: "IG_CC_CDN_SNIFF",
+        url: info.url,
+        kind: info.kind,
+        pathname: location.pathname,
+        ts: Date.now(),
+      },
+      "*"
+    );
+  }
+
+  // Recursively walk parsed JSON tree so each media item's audio URL is strictly bound to its OWN shortcode
+  // (propagating inheritedCode into nested carousel_media / media / clips_metadata objects).
+  function walkJsonForMedia(node, depth = 0, inheritedCode = null) {
     if (!node || typeof node !== "object" || depth > 25) return;
     if (Array.isArray(node)) {
       for (let i = 0; i < node.length; i++) {
-        walkJsonForMedia(node[i], depth + 1);
+        walkJsonForMedia(node[i], depth + 1, inheritedCode);
       }
       return;
     }
 
-    const code =
+    const ownCode =
       (typeof node.code === "string" && node.code.length >= 6 && node.code.length <= 24 && node.code) ||
       (typeof node.shortcode === "string" && node.shortcode.length >= 6 && node.shortcode.length <= 24 && node.shortcode) ||
       null;
+    const activeCode = ownCode || inheritedCode;
 
-    if (code) {
-      let found = false;
+    if (activeCode) {
       const dash =
         node.video_dash_manifest ||
         node.dash_manifest ||
@@ -132,14 +181,12 @@
       if (typeof dash === "string" && dash.includes("BaseURL")) {
         const audioUrls = extractAudioFromDash(dash);
         for (const u of audioUrls) {
-          emitMedia({ url: u, kind: "audio", shortcode: code });
-          found = true;
+          emitMedia({ url: u, kind: "audio", shortcode: activeCode });
         }
       }
       const prefetchAudio = extractPrefetchAudio(node);
       for (const u of prefetchAudio) {
-        emitMedia({ url: u, kind: "audio", shortcode: code });
-        found = true;
+        emitMedia({ url: u, kind: "audio", shortcode: activeCode });
       }
       if (Array.isArray(node.video_versions)) {
         // Sort smallest resolution first so muxed fallback stays under size caps whenever possible
@@ -150,25 +197,19 @@
         });
         for (const v of sortedVersions) {
           if (v && typeof v.url === "string" && v.url.startsWith("http")) {
-            emitMedia({ url: cleanByteRange(v.url), kind: "muxed", shortcode: code });
-            found = true;
+            emitMedia({ url: cleanByteRange(v.url), kind: "muxed", shortcode: activeCode });
           }
         }
       }
       if (typeof node.video_url === "string" && node.video_url.startsWith("http")) {
-        emitMedia({ url: cleanByteRange(node.video_url), kind: "muxed", shortcode: code });
-        found = true;
-      }
-      // Also check nested media object (e.g. { media: { code, video_dash_manifest } })
-      if (found) {
-        // Still descend in case of carousel / clips children, but this node is already matched
+        emitMedia({ url: cleanByteRange(node.video_url), kind: "muxed", shortcode: activeCode });
       }
     }
 
     for (const key of Object.keys(node)) {
       const val = node[key];
       if (val && typeof val === "object") {
-        walkJsonForMedia(val, depth + 1);
+        walkJsonForMedia(val, depth + 1, activeCode);
       }
     }
   }
@@ -205,13 +246,17 @@
     }
   }
 
-  // Expose parser for automated unit testing if needed
+  // Expose parser & classifier for automated unit testing
   window.__igccParseJsonText = parseJsonText;
+  window.__igccClassifyCdnUrl = classifyCdnUrl;
 
-  // Hook fetch for GraphQL / API responses
+  // Hook fetch for GraphQL / API responses AND live CDN DASH audio streams
   const origFetch = window.fetch;
   window.fetch = function (...args) {
     const reqUrl = typeof args[0] === "string" ? args[0] : (args[0] && args[0].url) || "";
+    if (reqUrl.includes("cdninstagram.com") || reqUrl.includes("fbcdn.net")) {
+      sniffCdnUrl(reqUrl);
+    }
     const promise = origFetch.apply(this, args);
     if (reqUrl.includes("/graphql") || reqUrl.includes("/api/v1/") || reqUrl.includes("instagram.com")) {
       promise
@@ -226,11 +271,14 @@
     return promise;
   };
 
-  // Hook XHR for GraphQL / API responses
+  // Hook XHR for GraphQL / API responses AND live CDN DASH audio streams
   const origOpen = XMLHttpRequest.prototype.open;
   const origSend = XMLHttpRequest.prototype.send;
   XMLHttpRequest.prototype.open = function (method, url, ...rest) {
     this.__igccUrl = typeof url === "string" ? url : String(url || "");
+    if (this.__igccUrl.includes("cdninstagram.com") || this.__igccUrl.includes("fbcdn.net")) {
+      sniffCdnUrl(this.__igccUrl);
+    }
     return origOpen.call(this, method, url, ...rest);
   };
   XMLHttpRequest.prototype.send = function (...args) {

@@ -40,8 +40,9 @@ const EXT = path.join(__dirname, "extension");
       },
       fetch: () => Promise.resolve({ headers: { get: () => "" }, clone: () => ({ text: () => Promise.resolve("") }) }),
     },
-    location: { href: "https://www.instagram.com/reels/REEL_AAA111/" },
+    location: { href: "https://www.instagram.com/reels/REEL_AAA111/", pathname: "/reels/REEL_AAA111/" },
     URL,
+    atob,
     XMLHttpRequest: { prototype: { open() {}, send() {} } },
     document: { readyState: "complete", querySelectorAll: () => [], addEventListener() {} },
     setInterval: () => 0,
@@ -116,7 +117,36 @@ const EXT = path.join(__dirname, "extension");
   assert.equal(aaaMuxed[0].url, "https://scontent.cdninstagram.com/v/muxed_480p.mp4", "Smallest resolution muxed video should come first");
   assert.equal(byCode.get("REEL_BBB222")[0].url, "https://scontent.cdninstagram.com/v/audio_bbb.mp4?oh=2");
   assert.equal(byCode.get("REEL_CCC333")[0].url, "https://scontent.cdninstagram.com/v/aud_ccc.mp4");
-  console.log("[PASS] 1. hook.js: Real IG DASH (<Representation> mimeType, lowest bandwidth, dash_info, prefetch, smallest muxed) verified");
+
+  // Nested carousel_media inheriting parent shortcode (Likes / Saved / Carousel posts)
+  sandbox.window.__igccParseJsonText(
+    JSON.stringify({
+      shortcode: "LIKED_CAROUSEL",
+      carousel_media: [
+        {
+          video_dash_manifest: `<MPD><AdaptationSet contentType="audio"><Representation mimeType="audio/mp4" bandwidth="48000"><BaseURL>https://scontent.cdninstagram.com/v/liked_aud.mp4</BaseURL></Representation></AdaptationSet></MPD>`,
+        },
+      ],
+    })
+  );
+  assert.ok(
+    emitted.some((e) => e.shortcode === "LIKED_CAROUSEL" && e.url === "https://scontent.cdninstagram.com/v/liked_aud.mp4"),
+    "Nested carousel_media must inherit parent shortcode"
+  );
+
+  // Live CDN URL classification via efg base64 metadata
+  const audioEfg = Buffer.from('{"vencode_tag":"dash_baseline_audio_v1"}').toString("base64");
+  const videoEfg = Buffer.from('{"vencode_tag":"dash_vp9_video_720p"}').toString("base64");
+  const audioClassified = sandbox.window.__igccClassifyCdnUrl(
+    `https://scontent.cdninstagram.com/v/stream.mp4?efg=${audioEfg}&bytestart=0&byteend=999`
+  );
+  const videoClassified = sandbox.window.__igccClassifyCdnUrl(
+    `https://scontent.cdninstagram.com/v/stream.mp4?efg=${videoEfg}&bytestart=0&byteend=999`
+  );
+  assert.equal(audioClassified?.kind, "audio");
+  assert.equal(audioClassified?.url.includes("bytestart"), false);
+  assert.equal(videoClassified, null, "Silent video-only DASH tracks must be ignored");
+  console.log("[PASS] 1. hook.js: Real IG DASH, nested shortcode inheritance & live CDN efg audio sniffing verified");
 }
 
 // --- Suite 2: audio_utils.js DSP downsampling, WAV header & chunk stitching ---
@@ -479,5 +509,13 @@ const EXT = path.join(__dirname, "extension");
   assert.equal(api.shortcodeMap.size, api.MAX_CACHE_ENTRIES);
   assert.equal(api.shortcodeMap.has("SC_BOUND_0"), false);
   assert.equal(api.shortcodeMap.has("SC_BOUND_249"), true);
-  console.log("[PASS] 4. content.js: React <video> reuse isolation & bounded FIFO cache verified");
+
+  // Likes / Activity modal scenario: no /reel/CODE in URL, blob: video src, resolved via live CDN sniff
+  loc.pathname = "/your_activity/interactions/likes/";
+  const likesVideo = { currentSrc: "blob:https://www.instagram.com/likes-vid", parentElement: null };
+  api.recordCdnSniff("https://scontent.cdninstagram.com/live_likes_audio.mp4?bytestart=0&byteend=4096", "audio", "/your_activity/interactions/likes/", Date.now());
+  const likesResolved = api.resolveCandidates(likesVideo);
+  assert.ok(likesResolved, "Likes modal video must resolve via live CDN audio sniff");
+  assert.equal(likesResolved.candidates[0], "https://scontent.cdninstagram.com/live_likes_audio.mp4");
+  console.log("[PASS] 4. content.js: React <video> reuse isolation, bounded FIFO cache & Likes/Activity modal CDN fallback verified");
 }
