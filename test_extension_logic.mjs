@@ -38,6 +38,7 @@ const EXT = path.join(__dirname, "extension");
       postMessage(msg) {
         emitted.push(msg);
       },
+      addEventListener() {},
       fetch: () => Promise.resolve({ headers: { get: () => "" }, clone: () => ({ text: () => Promise.resolve("") }) }),
     },
     location: { href: "https://www.instagram.com/reels/REEL_AAA111/", pathname: "/reels/REEL_AAA111/" },
@@ -146,7 +147,26 @@ const EXT = path.join(__dirname, "extension");
   assert.equal(audioClassified?.kind, "audio");
   assert.equal(audioClassified?.url.includes("bytestart"), false);
   assert.equal(videoClassified, null, "Silent video-only DASH tracks must be ignored");
-  console.log("[PASS] 1. hook.js: Real IG DASH, nested shortcode inheritance & live CDN efg audio sniffing verified");
+
+  // React Fiber direct DOM probe (1-to-1 bound to the exact <video> element)
+  const mockVideo = {
+    __reactFiber$xyz123: {
+      memoizedProps: {},
+      return: {
+        memoizedProps: {
+          media: {
+            code: "FIBER_VID99",
+            video_dash_manifest: `<MPD><AdaptationSet contentType="audio"><Representation mimeType="audio/mp4" bandwidth="48000"><BaseURL>https://scontent.cdninstagram.com/v/fiber_audio_99.mp4</BaseURL></Representation></AdaptationSet></MPD>`,
+          },
+        },
+        return: null,
+      },
+    },
+  };
+  const fiberRes = sandbox.window.__igccProbeVideoReactFiber(mockVideo);
+  assert.equal(fiberRes.shortcode, "FIBER_VID99");
+  assert.equal(fiberRes.audio[0], "https://scontent.cdninstagram.com/v/fiber_audio_99.mp4");
+  console.log("[PASS] 1. hook.js: Real IG DASH, nested shortcode inheritance, CDN efg sniffing & React Fiber probe verified");
 }
 
 // --- Suite 2: audio_utils.js DSP downsampling, WAV header & chunk stitching ---
@@ -527,5 +547,10 @@ const EXT = path.join(__dirname, "extension");
   const likesResolved = api.resolveCandidates(likesVideo, { allowPathSniff: true });
   assert.ok(likesResolved, "Anonymous Likes modal video must resolve via live CDN audio sniff when allowPathSniff=true");
   assert.equal(likesResolved.candidates[0], "https://scontent.cdninstagram.com/live_likes_audio.mp4");
-  console.log("[PASS] 4. content.js: React <video> reuse isolation, anti-ad-hijack & Likes/Activity modal fallback verified");
+
+  // Instagram base64 shortcode -> 64-bit numeric media_id conversion
+  assert.equal(api.shortcodeToMediaId("B"), "1");
+  assert.equal(api.shortcodeToMediaId("BA"), "64");
+  assert.equal(api.shortcodeToMediaId("Cj0x23AbC45"), "2951202930028195385");
+  console.log("[PASS] 4. content.js: React <video> reuse isolation, anti-ad-hijack, shortcodeToMediaId & modal fallback verified");
 }

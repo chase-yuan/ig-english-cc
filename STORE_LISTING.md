@@ -5,7 +5,7 @@
 ---
 
 ## Step 1: 上传扩展包 (Packages)
-- 直接上传本地文件：`dist/english-cc-for-instagram-v2.1.2.zip`（同一个包，Edge 原生兼容 Manifest V3）
+- 直接上传本地文件：`dist/english-cc-for-instagram-v2.1.3.zip`（同一个包，Edge 原生兼容 Manifest V3）
 
 ---
 

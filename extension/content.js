@@ -262,29 +262,102 @@
     }
   }
 
+  const IG_SHORTCODE_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+
+  function shortcodeToMediaId(shortcode) {
+    if (!shortcode || typeof shortcode !== "string") return null;
+    // Strip any query/suffix and convert Instagram base64 shortcode -> 64-bit numeric media_id
+    const clean = shortcode.trim();
+    if (!clean || clean.length > 24) return null;
+    try {
+      let id = 0n;
+      for (let i = 0; i < clean.length; i++) {
+        const idx = IG_SHORTCODE_ALPHABET.indexOf(clean[i]);
+        if (idx < 0) return null;
+        id = id * 64n + BigInt(idx);
+      }
+      return id.toString();
+    } catch {
+      return null;
+    }
+  }
+
+  function probeVideoViaHook(video) {
+    if (!video || typeof video.setAttribute !== "function") {
+      return Promise.resolve({ audio: [], muxed: [], shortcode: null });
+    }
+    const reqId = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    return new Promise((resolve) => {
+      let done = false;
+      const finish = (res) => {
+        if (done) return;
+        done = true;
+        window.removeEventListener("message", onMsg);
+        try {
+          video.removeAttribute("data-igcc-probe");
+        } catch {}
+        resolve(res || { audio: [], muxed: [], shortcode: null });
+      };
+      const onMsg = (event) => {
+        if (event.source !== window || !event.data || event.data.type !== "IG_CC_PROBE_VIDEO_RES") return;
+        if (event.data.reqId !== reqId) return;
+        finish({
+          audio: Array.isArray(event.data.audio) ? event.data.audio : [],
+          muxed: Array.isArray(event.data.muxed) ? event.data.muxed : [],
+          shortcode: event.data.shortcode || null,
+        });
+      };
+      window.addEventListener("message", onMsg);
+      video.setAttribute("data-igcc-probe", reqId);
+      window.postMessage({ type: "IG_CC_PROBE_VIDEO_REQ", reqId }, "*");
+      setTimeout(() => finish({ audio: [], muxed: [], shortcode: null }), 400);
+    });
+  }
+
   // Exact same-origin fetch when opened from Likes / Activity without preloaded manifest (strictly filters by shortcode!)
   async function fetchShortcodeFallback(shortcode) {
     if (!shortcode || typeof fetch !== "function") return [];
     const outAudio = [];
     const outMuxed = [];
 
-    for (const pathPrefix of ["p", "reel"]) {
+    // Strategy A: Official Instagram Web Media Info API (clean JSON for THIS exact media_id, zero ads)
+    const mediaId = shortcodeToMediaId(shortcode);
+    if (mediaId) {
       try {
-        const resp = await fetch(`${location.origin}/${pathPrefix}/${shortcode}/`, { credentials: "same-origin" });
-        if (!resp.ok) continue;
-        const html = await resp.text();
-        const scriptRe = /<script[^>]*type=["']application\/json["'][^>]*>([\s\S]*?)<\/script>/gi;
-        let sm;
-        while ((sm = scriptRe.exec(html)) !== null) {
-          const raw = sm[1];
-          if (!raw || !raw.includes(shortcode)) continue;
-          try {
-            const parsed = JSON.parse(raw);
-            extractExactShortcodeFromJson(parsed, shortcode, outAudio, outMuxed, 0, null);
-          } catch {}
+        const apiResp = await fetch(`${location.origin}/api/v1/media/${mediaId}/info/`, {
+          credentials: "same-origin",
+          headers: {
+            "x-ig-app-id": "936619743392459",
+            "x-requested-with": "XMLHttpRequest",
+          },
+        });
+        if (apiResp.ok) {
+          const data = await apiResp.json();
+          extractExactShortcodeFromJson(data, shortcode, outAudio, outMuxed, 0, shortcode);
         }
-        if (outAudio.length > 0 || outMuxed.length > 0) break;
       } catch {}
+    }
+
+    // Strategy B: Same-origin SSR HTML fallback
+    if (outAudio.length === 0 && outMuxed.length === 0) {
+      for (const pathPrefix of ["p", "reel"]) {
+        try {
+          const resp = await fetch(`${location.origin}/${pathPrefix}/${shortcode}/`, { credentials: "same-origin" });
+          if (!resp.ok) continue;
+          const html = await resp.text();
+          const scriptRe = /<script[^>]*type=["']application\/json["'][^>]*>([\s\S]*?)<\/script>/gi;
+          let sm;
+          while ((sm = scriptRe.exec(html)) !== null) {
+            const raw = sm[1];
+            if (!raw || !raw.includes(shortcode)) continue;
+            try {
+              const parsed = JSON.parse(raw);
+              extractExactShortcodeFromJson(parsed, shortcode, outAudio, outMuxed, 0, null);
+            } catch {}
+          }
+          if (outAudio.length > 0 || outMuxed.length > 0) break;
+        } catch {}
+      }
     }
 
     const seen = new Set();
@@ -486,9 +559,29 @@
     // 1. Try exact shortcode / direct HTTP binding first (never let background-prefetched ads hijack it)
     let resolved = resolveCandidates(video, { allowPathSniff: false });
 
-    // 2. If we have a shortcode (e.g. Likes / Activity modal), fetch that exact post's manifest directly
+    // 2. Inspect THIS exact <video> DOM node's React Fiber props in MAIN world (instant, 1-to-1 bound, zero ads)
+    let probedShortcode = null;
     if (!resolved) {
-      const fallbackCode = extractShortcodeFromVideo(video);
+      const probed = await probeVideoViaHook(video);
+      probedShortcode = probed.shortcode || null;
+      const fiberUrls = [...probed.audio, ...probed.muxed];
+      if (fiberUrls.length > 0) {
+        const sc = extractShortcodeFromVideo(video) || probedShortcode;
+        if (sc) {
+          probed.audio.forEach((u) => recordMedia(u, "audio", sc));
+          probed.muxed.forEach((u) => recordMedia(u, "muxed", sc));
+        }
+        resolved = {
+          candidates: fiberUrls,
+          videoKey: sc ? `sc:${sc}` : `src:${fiberUrls[0]}`,
+          shortcode: sc,
+        };
+      }
+    }
+
+    // 3. If we have a shortcode (from URL, modal dialog, or React Fiber), fetch via official IG Media Info API
+    if (!resolved) {
+      const fallbackCode = extractShortcodeFromVideo(video) || probedShortcode;
       if (fallbackCode) {
         showToast("Locating audio stream…");
         const fetchedUrls = await fetchShortcodeFallback(fallbackCode);
@@ -502,8 +595,8 @@
       }
     }
 
-    // 3. Only if no shortcode exists at all (anonymous modal video), fall back to live CDN audio sniff
-    if (!resolved && !extractShortcodeFromVideo(video)) {
+    // 4. Only if no shortcode exists at all (anonymous modal video), fall back to live CDN audio sniff
+    if (!resolved && !extractShortcodeFromVideo(video) && !probedShortcode) {
       resolved = resolveCandidates(video, { allowPathSniff: true });
     }
 
@@ -622,6 +715,7 @@
     MAX_CACHE_ENTRIES,
     recordMedia,
     recordCdnSniff,
+    shortcodeToMediaId,
     getVideoIdentity,
     resolveCandidates,
     getKeyState,

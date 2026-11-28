@@ -246,9 +246,132 @@
     }
   }
 
-  // Expose parser & classifier for automated unit testing
+  // Inspect a specific <video> DOM node's React Fiber ancestor chain to extract ITS OWN media manifest/URLs
+  function extractMediaFromObjectShallow(obj, outAudio, outMuxed, depth = 0, visited = new Set()) {
+    if (!obj || typeof obj !== "object" || depth > 8 || visited.has(obj)) return;
+    // Skip DOM nodes and window to avoid huge cycles
+    if (obj.nodeType || obj === window || obj === document) return;
+    visited.add(obj);
+
+    if (Array.isArray(obj)) {
+      const limit = Math.min(obj.length, 20);
+      for (let i = 0; i < limit; i++) {
+        extractMediaFromObjectShallow(obj[i], outAudio, outMuxed, depth + 1, visited);
+      }
+      return;
+    }
+
+    const dash =
+      obj.video_dash_manifest ||
+      obj.dash_manifest ||
+      obj.dashManifest ||
+      obj.manifest ||
+      (obj.dash_info && (obj.dash_info.video_dash_manifest || obj.dash_info.dash_manifest));
+    if (typeof dash === "string" && dash.includes("BaseURL")) {
+      for (const u of extractAudioFromDash(dash)) outAudio.push(u);
+    }
+
+    const prefetchAudio = extractPrefetchAudio(obj);
+    for (const u of prefetchAudio) outAudio.push(u);
+
+    if (Array.isArray(obj.video_versions)) {
+      const sorted = [...obj.video_versions].sort((a, b) => {
+        const areaA = (Number(a && a.width) || 9999) * (Number(a && a.height) || 9999);
+        const areaB = (Number(b && b.width) || 9999) * (Number(b && b.height) || 9999);
+        return areaA - areaB;
+      });
+      for (const v of sorted) {
+        if (v && typeof v.url === "string" && v.url.startsWith("http")) {
+          outMuxed.push(cleanByteRange(v.url));
+        }
+      }
+    }
+
+    for (const k of ["video_url", "videoUrl", "audio_url", "audioUrl", "sd_src", "hd_src", "playable_url"]) {
+      const v = obj[k];
+      if (typeof v === "string" && v.startsWith("http") && (v.includes("cdninstagram.com") || v.includes("fbcdn.net"))) {
+        if (k.toLowerCase().includes("audio")) outAudio.push(cleanByteRange(v));
+        else outMuxed.push(cleanByteRange(v));
+      }
+    }
+
+    // Descend into likely media container keys only (keeps React Fiber probe < 2ms and immune to sibling posts)
+    const mediaKeys = [
+      "media",
+      "post",
+      "item",
+      "clip",
+      "video",
+      "videoData",
+      "implementations",
+      "dashInfo",
+      "dash_info",
+      "extensions",
+      "carousel_media",
+      "data",
+      "xdt_shortcode_media",
+      "shortcode_media",
+    ];
+    for (const k of mediaKeys) {
+      if (obj[k] && typeof obj[k] === "object") {
+        extractMediaFromObjectShallow(obj[k], outAudio, outMuxed, depth + 1, visited);
+      }
+    }
+  }
+
+  function probeVideoReactFiber(videoEl) {
+    if (!videoEl) return { audio: [], muxed: [], shortcode: null };
+    const outAudio = [];
+    const outMuxed = [];
+    let foundCode = null;
+    const visited = new Set();
+
+    const keys = Object.keys(videoEl);
+    const fiberKey = keys.find((k) => k.startsWith("__reactFiber$") || k.startsWith("__reactInternalInstance$"));
+    const propsKey = keys.find((k) => k.startsWith("__reactProps$"));
+
+    if (propsKey && videoEl[propsKey]) {
+      extractMediaFromObjectShallow(videoEl[propsKey], outAudio, outMuxed, 0, visited);
+    }
+
+    let fiber = fiberKey ? videoEl[fiberKey] : null;
+    for (let step = 0; step < 35 && fiber; step++) {
+      const props = fiber.memoizedProps || fiber.pendingProps;
+      if (props && typeof props === "object") {
+        if (!foundCode) {
+          const c =
+            (typeof props.code === "string" && props.code.length >= 6 && props.code.length <= 24 && props.code) ||
+            (typeof props.shortcode === "string" && props.shortcode.length >= 6 && props.shortcode.length <= 24 && props.shortcode) ||
+            (props.media && typeof props.media.code === "string" && props.media.code) ||
+            (props.post && typeof props.post.code === "string" && props.post.code) ||
+            null;
+          if (c) foundCode = c;
+        }
+        extractMediaFromObjectShallow(props, outAudio, outMuxed, 0, visited);
+        if (outAudio.length > 0) break;
+      }
+      fiber = fiber.return;
+    }
+
+    const dedup = (arr) => Array.from(new Set(arr));
+    return { audio: dedup(outAudio), muxed: dedup(outMuxed), shortcode: foundCode };
+  }
+
+  window.addEventListener("message", (event) => {
+    if (event.source !== window || !event.data || event.data.type !== "IG_CC_PROBE_VIDEO_REQ") return;
+    const reqId = event.data.reqId;
+    const el = document.querySelector(`video[data-igcc-probe="${reqId}"]`);
+    let result = { audio: [], muxed: [], shortcode: null };
+    try {
+      if (el) result = probeVideoReactFiber(el);
+    } catch {}
+    window.postMessage({ type: "IG_CC_PROBE_VIDEO_RES", reqId, ...result }, "*");
+  });
+
+  // Expose parser, classifier & fiber probe for automated unit testing
   window.__igccParseJsonText = parseJsonText;
   window.__igccClassifyCdnUrl = classifyCdnUrl;
+  window.__igccProbeVideoReactFiber = probeVideoReactFiber;
 
   // Hook fetch for GraphQL / API responses AND live CDN DASH audio streams
   const origFetch = window.fetch;
