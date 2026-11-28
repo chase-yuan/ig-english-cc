@@ -3,7 +3,7 @@
 const GROQ_ENDPOINT = "https://api.groq.com/openai/v1/audio/transcriptions";
 const GROQ_CHAT_ENDPOINT = "https://api.groq.com/openai/v1/chat/completions";
 const GROQ_MODEL = "whisper-large-v3-turbo";
-const GROQ_LLM_MODEL = "llama-3.3-70b-versatile";
+const GROQ_LLM_MODELS = ["openai/gpt-oss-120b", "qwen/qwen3.8-27b", "openai/gpt-oss-20b"];
 const DEFAULT_GEMINI_MODEL = "gemini-3.5-flash";
 const GEMINI_FALLBACK_MODELS = ["gemini-3.5-flash", "gemini-2.5-flash"];
 const MAX_AUDIO_BYTES = 24 * 1024 * 1024; // 24 MB safety margin under Groq's 25 MB cap
@@ -408,10 +408,11 @@ async function callGeminiStudyMiner(prompt, apiKey, preferredModel) {
             generationConfig: {
               responseMimeType: "application/json",
               temperature: 0.3,
+              thinkingConfig: { thinkingBudget: 0 },
             },
           }),
         },
-        18000
+        35000
       );
       if (resp.ok) {
         const data = await resp.json();
@@ -447,38 +448,41 @@ async function callGroqStudyMiner(prompt, keys) {
     rotated.push(keys[(start + i) % keys.length]);
   }
   let lastErr = "Groq LLM study mining failed";
-  for (const key of rotated) {
-    try {
-      const resp = await fetchWithTimeout(
-        GROQ_CHAT_ENDPOINT,
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${key}`,
+  for (const model of GROQ_LLM_MODELS) {
+    for (const key of rotated) {
+      try {
+        const resp = await fetchWithTimeout(
+          GROQ_CHAT_ENDPOINT,
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${key}`,
+            },
+            body: JSON.stringify({
+              model,
+              temperature: 0.3,
+              response_format: { type: "json_object" },
+              messages: [{ role: "user", content: prompt }],
+            }),
           },
-          body: JSON.stringify({
-            model: GROQ_LLM_MODEL,
-            temperature: 0.3,
-            response_format: { type: "json_object" },
-            messages: [{ role: "user", content: prompt }],
-          }),
-        },
-        18000
-      );
-      if (resp.ok) {
-        const data = await resp.json();
-        const rawText =
-          data && data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content;
-        if (!rawText) throw new Error("Empty Groq LLM response");
-        return { parsed: JSON.parse(rawText), modelUsed: `groq/${GROQ_LLM_MODEL}` };
+          25000
+        );
+        if (resp.ok) {
+          const data = await resp.json();
+          const rawText =
+            data && data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content;
+          if (!rawText) throw new Error("Empty Groq LLM response");
+          return { parsed: JSON.parse(rawText), modelUsed: `groq/${model}` };
+        }
+        const errText = (await resp.text()).slice(0, 220);
+        lastErr = `Groq ${model} HTTP ${resp.status}: ${errText}`;
+        if ([404].includes(resp.status)) break; // Try next Groq model
+        if ([401, 429, 500, 502, 503].includes(resp.status)) continue;
+        throw new Error(lastErr);
+      } catch (err) {
+        lastErr = err && err.message ? err.message : String(err);
       }
-      const errText = (await resp.text()).slice(0, 220);
-      lastErr = `Groq LLM HTTP ${resp.status}: ${errText}`;
-      if ([401, 429, 500, 502, 503].includes(resp.status)) continue;
-      throw new Error(lastErr);
-    } catch (err) {
-      lastErr = err && err.message ? err.message : String(err);
     }
   }
   throw new Error(lastErr);
@@ -498,13 +502,13 @@ async function mineStudyCards(videoKey, transcriptText, segments) {
   const groqKeys = await getGroqKeys();
 
   let rawResult = null;
-  let lastError = "No Gemini or Groq API key configured.";
+  const errors = [];
 
   if (gemini.apiKey) {
     try {
       rawResult = await callGeminiStudyMiner(prompt, gemini.apiKey, gemini.model);
     } catch (err) {
-      lastError = err && err.message ? err.message : String(err);
+      errors.push(`Gemini: ${err && err.message ? err.message : String(err)}`);
     }
   }
 
@@ -512,12 +516,15 @@ async function mineStudyCards(videoKey, transcriptText, segments) {
     try {
       rawResult = await callGroqStudyMiner(prompt, groqKeys);
     } catch (err) {
-      lastError = err && err.message ? err.message : String(err);
+      errors.push(`Groq: ${err && err.message ? err.message : String(err)}`);
     }
   }
 
   if (!rawResult) {
-    return { ok: false, error: lastError };
+    return {
+      ok: false,
+      error: errors.length > 0 ? errors.join(" | ") : "No Gemini or Groq API key configured.",
+    };
   }
 
   const rawItems = Array.isArray(rawResult.parsed && rawResult.parsed.items)

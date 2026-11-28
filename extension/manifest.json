@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "English CC for Instagram",
-  "version": "2.2.0",
+  "version": "2.2.1",
   "description": "YouTube-style pure English subtitles, one-click TXT export & AI C1/C2 vocabulary / Anki card mining for Instagram Web.",
   "icons": {
     "16": "icons/icon16.png",
