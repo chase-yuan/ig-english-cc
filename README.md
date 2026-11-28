@@ -1,8 +1,8 @@
-# IG English CC (v2.0 — Zero-Backend Pure Extension)
+# IG English CC (v2.1 — Zero-Backend Pure Extension)
 
 > **YouTube-style pure English subtitles & one-click `.txt` transcript download for Instagram Web (Edge / Chrome).**
 >
-> **Zero Python. Zero `ffmpeg`. Zero local server.** Just load the `extension/` folder, paste one free Groq API key, and start watching Instagram with selectable English subtitles.
+> **Zero Python. Zero `ffmpeg`. Zero local server.** Just load the `extension/` folder, paste one free Groq API key, and start watching Instagram with selectable English subtitles — including large/long videos (>24 MB) via automatic in-browser 16 kHz WAV extraction & chunking.
 
 ---
 

@@ -122,6 +122,86 @@ async function callGroqWhisper(audioBuf, keys) {
   throw new Error(lastErr);
 }
 
+let offscreenCreating = null;
+
+async function ensureOffscreenDocument() {
+  if (!chrome.offscreen || typeof chrome.offscreen.createDocument !== "function") {
+    throw new Error("Browser offscreen audio extractor is not available.");
+  }
+  if (chrome.runtime && typeof chrome.runtime.getContexts === "function") {
+    const existing = await chrome.runtime.getContexts({
+      contextTypes: ["OFFSCREEN_DOCUMENT"],
+    });
+    if (existing && existing.length > 0) return;
+  }
+  if (offscreenCreating) {
+    await offscreenCreating;
+    return;
+  }
+  offscreenCreating = chrome.offscreen
+    .createDocument({
+      url: "offscreen.html",
+      reasons: ["AUDIO_PLAYBACK"],
+      justification: "Decode audio track from large Instagram videos into 16kHz mono WAV chunks under 24MB for Whisper transcription.",
+    })
+    .catch((err) => {
+      const msg = String((err && err.message) || err || "");
+      if (!msg.includes("single offscreen document")) {
+        throw err;
+      }
+    })
+    .finally(() => {
+      offscreenCreating = null;
+    });
+  await offscreenCreating;
+}
+
+async function transcribeOversizedViaOffscreen(mediaUrl, keys) {
+  await ensureOffscreenDocument();
+  return new Promise((resolve, reject) => {
+    chrome.runtime.sendMessage(
+      {
+        type: "IG_CC_OFFSCREEN_EXTRACT_AND_TRANSCRIBE",
+        mediaUrl,
+        keys,
+        groqEndpoint: GROQ_ENDPOINT,
+        groqModel: GROQ_MODEL,
+      },
+      (res) => {
+        if (chrome.runtime.lastError) {
+          reject(new Error(chrome.runtime.lastError.message));
+          return;
+        }
+        resolve(res);
+      }
+    );
+  });
+}
+
+function buildFinalResult(videoKey, fullText, rawSegments) {
+  let segments = (Array.isArray(rawSegments) ? rawSegments : [])
+    .map((s) => ({
+      start: Math.round(Number(s.start || 0) * 1000) / 1000,
+      end: Math.round(Number(s.end || 0) * 1000) / 1000,
+      text: String(s.text || "").trim(),
+    }))
+    .filter((s) => s.text);
+
+  const cleanedText = String(fullText || "").trim();
+  if (segments.length === 0 && cleanedText) {
+    segments = [{ start: 0, end: 5, text: cleanedText }];
+  }
+
+  return {
+    ok: true,
+    cached: false,
+    key: videoKey,
+    text: cleanedText,
+    segments,
+    srt: segmentsToSrt(segments),
+  };
+}
+
 async function transcribeCandidates(candidates, videoKey) {
   const cached = await getCachedSubtitle(videoKey);
   if (cached) return cached;
@@ -140,6 +220,9 @@ async function transcribeCandidates(candidates, videoKey) {
   }
 
   let lastError = "Could not transcribe audio stream.";
+  const oversized = [];
+
+  // Pass 1 (Fast Path): try any stream <= 24 MB directly without audio transcoding
   for (const mediaUrl of validUrls) {
     try {
       const mediaResp = await fetch(mediaUrl);
@@ -147,43 +230,55 @@ async function transcribeCandidates(candidates, videoKey) {
         lastError = `CDN HTTP ${mediaResp.status}`;
         continue;
       }
+
+      const clHeader = mediaResp.headers && mediaResp.headers.get("content-length");
+      const declaredBytes = clHeader ? Number(clHeader) : 0;
+      if (declaredBytes > MAX_AUDIO_BYTES) {
+        try {
+          await mediaResp.body?.cancel?.();
+        } catch {}
+        oversized.push({ url: mediaUrl, size: declaredBytes });
+        lastError = `Media > 24 MB (${(declaredBytes / (1024 * 1024)).toFixed(1)} MB), queued for audio extraction`;
+        continue;
+      }
+
       const buf = await mediaResp.arrayBuffer();
       if (buf.byteLength < 1024) {
         lastError = "Audio buffer too small";
         continue;
       }
       if (buf.byteLength > MAX_AUDIO_BYTES) {
-        lastError = `Media too large (${(buf.byteLength / (1024 * 1024)).toFixed(1)} MB > 24 MB Groq limit)`;
+        oversized.push({ url: mediaUrl, size: buf.byteLength });
+        lastError = `Media > 24 MB (${(buf.byteLength / (1024 * 1024)).toFixed(1)} MB), queued for audio extraction`;
         continue;
       }
 
       const groqRes = await callGroqWhisper(buf, keys);
-      const rawSegments = Array.isArray(groqRes.segments) ? groqRes.segments : [];
-      let segments = rawSegments
-        .map((s) => ({
-          start: Math.round(Number(s.start || 0) * 1000) / 1000,
-          end: Math.round(Number(s.end || 0) * 1000) / 1000,
-          text: String(s.text || "").trim(),
-        }))
-        .filter((s) => s.text);
-
-      const fullText = String(groqRes.text || "").trim();
-      if (segments.length === 0 && fullText) {
-        segments = [{ start: 0, end: 5, text: fullText }];
-      }
-
-      const result = {
-        ok: true,
-        cached: false,
-        key: videoKey,
-        text: fullText,
-        segments,
-        srt: segmentsToSrt(segments),
-      };
+      const result = buildFinalResult(videoKey, groqRes.text, groqRes.segments);
       await saveCachedSubtitle(videoKey, result);
       return result;
     } catch (err) {
       lastError = err && err.message ? err.message : String(err);
+    }
+  }
+
+  // Pass 2 (Large Video Fallback): extract 16 kHz mono WAV & chunk via Offscreen AudioContext
+  if (oversized.length > 0) {
+    oversized.sort((a, b) => a.size - b.size);
+    for (const item of oversized) {
+      try {
+        const offRes = await transcribeOversizedViaOffscreen(item.url, keys);
+        if (offRes && offRes.ok) {
+          const result = buildFinalResult(videoKey, offRes.text, offRes.segments);
+          await saveCachedSubtitle(videoKey, result);
+          return result;
+        }
+        if (offRes && offRes.error) {
+          lastError = offRes.error;
+        }
+      } catch (err) {
+        lastError = err && err.message ? err.message : String(err);
+      }
     }
   }
 
