@@ -5,7 +5,7 @@
   <title>IG English CC</title>
   <style>
     body {
-      width: 310px;
+      width: 330px;
       margin: 0;
       padding: 14px;
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
@@ -14,15 +14,22 @@
       font-size: 13px;
     }
     h1 {
-      margin: 0 0 6px;
+      margin: 0 0 8px;
       font-size: 15px;
       font-weight: 700;
     }
-    p {
-      margin: 0 0 10px;
-      color: #a8a8a8;
-      line-height: 1.4;
+    label {
+      display: block;
+      margin: 10px 0 4px;
       font-size: 12px;
+      font-weight: 600;
+      color: #e5e5e5;
+    }
+    p {
+      margin: 0 0 6px;
+      color: #a3a3a3;
+      line-height: 1.4;
+      font-size: 11.5px;
     }
     a {
       color: #60a5fa;
@@ -31,10 +38,9 @@
     a:hover {
       text-decoration: underline;
     }
-    textarea {
+    textarea, input[type="password"], input[type="text"] {
       width: 100%;
       box-sizing: border-box;
-      height: 76px;
       padding: 8px;
       border-radius: 6px;
       border: 1px solid #333;
@@ -42,12 +48,15 @@
       color: #fff;
       font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
       font-size: 12px;
+    }
+    textarea {
+      height: 66px;
       resize: vertical;
     }
     .row {
       display: flex;
       gap: 8px;
-      margin-top: 10px;
+      margin-top: 12px;
     }
     button {
       flex: 1;
@@ -77,12 +86,24 @@
 </head>
 <body>
   <h1>IG English CC</h1>
+
+  <label for="keysInput">Groq API Keys (Subtitles + Fallback)</label>
   <p>
-    Paste your free <a href="https://console.groq.com/keys" target="_blank" rel="noreferrer">Groq API key</a> (one per line for auto-rotation). Stored locally in your browser only.
+    Free keys from <a href="https://console.groq.com/keys" target="_blank" rel="noreferrer">console.groq.com</a> (one per line for auto-rotation).
   </p>
   <textarea id="keysInput" placeholder="gsk_..."></textarea>
+
+  <label for="geminiKeyInput">Gemini API Key (Optional — AI Study Cards)</label>
+  <p>
+    Free key from <a href="https://aistudio.google.com/apikey" target="_blank" rel="noreferrer">aistudio.google.com</a>. If empty, Groq LLM is used automatically.
+  </p>
+  <input id="geminiKeyInput" type="password" placeholder="AQ.... or AIza..." autocomplete="off" />
+
+  <label for="geminiModelInput">Gemini Model ID</label>
+  <input id="geminiModelInput" type="text" placeholder="gemini-3.5-flash" />
+
   <div class="row">
-    <button id="saveBtn" type="button">Save Key</button>
+    <button id="saveBtn" type="button">Save Settings</button>
     <button id="clearCacheBtn" type="button">Clear Cache</button>
   </div>
   <div id="status"></div>

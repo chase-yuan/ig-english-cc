@@ -432,7 +432,14 @@
   dlBtn.textContent = "⬇";
   dlBtn.title = "Download English TXT Transcript";
 
+  const aiBtn = document.createElement("button");
+  aiBtn.type = "button";
+  aiBtn.className = "igcc-btn igcc-btn-ai";
+  aiBtn.textContent = "AI";
+  aiBtn.title = "Mine C1/C2 Phrases & Anki Cards (Shortcut: A)";
+
   controls.appendChild(ccBtn);
+  controls.appendChild(aiBtn);
   controls.appendChild(dlBtn);
 
   const overlay = document.createElement("div");
@@ -443,8 +450,199 @@
   captionSpan.className = "igcc-caption-text";
   overlay.appendChild(captionSpan);
 
+  // Right-side Study & Anki Mining Drawer
+  const drawer = document.createElement("aside");
+  drawer.className = "igcc-drawer igcc-hidden";
+  stopEvents(drawer);
+
+  const drawerHeader = document.createElement("div");
+  drawerHeader.className = "igcc-drawer-header";
+  const drawerTitleWrap = document.createElement("div");
+  drawerTitleWrap.className = "igcc-drawer-title-wrap";
+  const drawerTitle = document.createElement("span");
+  drawerTitle.className = "igcc-drawer-title";
+  drawerTitle.textContent = "Study Cards";
+  const drawerBadge = document.createElement("span");
+  drawerBadge.className = "igcc-drawer-badge";
+  drawerBadge.textContent = "Gemini";
+  drawerTitleWrap.appendChild(drawerTitle);
+  drawerTitleWrap.appendChild(drawerBadge);
+
+  const drawerCloseBtn = document.createElement("button");
+  drawerCloseBtn.type = "button";
+  drawerCloseBtn.className = "igcc-drawer-close";
+  drawerCloseBtn.textContent = "×";
+  drawerCloseBtn.title = "Close Study Panel";
+  drawerHeader.appendChild(drawerTitleWrap);
+  drawerHeader.appendChild(drawerCloseBtn);
+
+  const drawerBody = document.createElement("div");
+  drawerBody.className = "igcc-drawer-body";
+
+  const drawerFooter = document.createElement("div");
+  drawerFooter.className = "igcc-drawer-footer";
+  const copyAllBtn = document.createElement("button");
+  copyAllBtn.type = "button";
+  copyAllBtn.className = "igcc-footer-btn igcc-footer-primary";
+  copyAllBtn.textContent = "Copy Anki CSV";
+  const dlCsvBtn = document.createElement("button");
+  dlCsvBtn.type = "button";
+  dlCsvBtn.className = "igcc-footer-btn igcc-footer-secondary";
+  dlCsvBtn.textContent = "Download .csv";
+  drawerFooter.appendChild(copyAllBtn);
+  drawerFooter.appendChild(dlCsvBtn);
+
+  drawer.appendChild(drawerHeader);
+  drawer.appendChild(drawerBody);
+  drawer.appendChild(drawerFooter);
+
   document.body.appendChild(controls);
   document.body.appendChild(overlay);
+  document.body.appendChild(drawer);
+
+  let activeStudyResult = null;
+  let activeStudyShortcode = null;
+
+  function formatMmSs(sec) {
+    const s = Math.max(0, Math.floor(Number(sec || 0)));
+    const m = Math.floor(s / 60);
+    const r = s % 60;
+    return `${m}:${String(r).padStart(2, "0")}`;
+  }
+
+  async function copyText(text, btn, doneLabel = "Copied") {
+    if (!text) return;
+    try {
+      await navigator.clipboard.writeText(text);
+      const orig = btn.textContent;
+      btn.textContent = doneLabel;
+      setTimeout(() => {
+        btn.textContent = orig;
+      }, 1400);
+    } catch {}
+  }
+
+  function renderStudyDrawer(studyRes, shortcode) {
+    activeStudyResult = studyRes;
+    activeStudyShortcode = shortcode;
+    drawerBadge.textContent = studyRes.model || "AI";
+    drawerBody.textContent = "";
+
+    const items = Array.isArray(studyRes.items) ? studyRes.items : [];
+    if (items.length === 0) {
+      const empty = document.createElement("div");
+      empty.className = "igcc-drawer-status";
+      empty.textContent = "No C1/C2 expressions found in this short clip.";
+      drawerBody.appendChild(empty);
+      return;
+    }
+
+    for (const item of items) {
+      const card = document.createElement("div");
+      card.className = "igcc-card";
+
+      const head = document.createElement("div");
+      head.className = "igcc-card-head";
+      const term = document.createElement("span");
+      term.className = "igcc-card-term";
+      term.textContent = item.term;
+      const cat = document.createElement("span");
+      cat.className = "igcc-card-cat";
+      cat.textContent = item.category || "C1/C2";
+      head.appendChild(term);
+      head.appendChild(cat);
+      card.appendChild(head);
+
+      const meaning = document.createElement("div");
+      meaning.className = "igcc-card-meaning";
+      meaning.textContent = item.meaning_zh;
+      card.appendChild(meaning);
+
+      if (item.nuance_zh) {
+        const nuance = document.createElement("div");
+        nuance.className = "igcc-card-nuance";
+        nuance.textContent = item.nuance_zh;
+        card.appendChild(nuance);
+      }
+
+      if (item.quote) {
+        const qRow = document.createElement("div");
+        qRow.className = "igcc-card-quote-row";
+        const tsBtn = document.createElement("button");
+        tsBtn.type = "button";
+        tsBtn.className = "igcc-ts-btn";
+        tsBtn.textContent = formatMmSs(item.timestamp_sec);
+        tsBtn.title = "Jump video to this line";
+        tsBtn.addEventListener("click", (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          const v = currentVideo || pickPrimaryVideo();
+          if (v && Number.isFinite(item.timestamp_sec)) {
+            v.currentTime = Math.max(0, item.timestamp_sec - 0.3);
+            v.play?.().catch?.(() => {});
+          }
+        });
+        const qTxt = document.createElement("span");
+        qTxt.className = "igcc-card-quote";
+        qTxt.textContent = `“${item.quote}”`;
+        qRow.appendChild(tsBtn);
+        qRow.appendChild(qTxt);
+        card.appendChild(qRow);
+      }
+
+      if (item.anki_front && item.anki_back) {
+        const ankiBox = document.createElement("div");
+        ankiBox.className = "igcc-anki-box";
+        const frontDiv = document.createElement("div");
+        frontDiv.textContent = item.anki_front.replace(/<br\s*\/?>/gi, " · ");
+        const backDiv = document.createElement("div");
+        backDiv.className = "igcc-anki-back";
+        backDiv.textContent = item.anki_back.replace(/<br\s*\/?>/gi, " — ");
+        ankiBox.appendChild(frontDiv);
+        ankiBox.appendChild(backDiv);
+        card.appendChild(ankiBox);
+
+        const actions = document.createElement("div");
+        actions.className = "igcc-card-actions";
+        const copyOneBtn = document.createElement("button");
+        copyOneBtn.type = "button";
+        copyOneBtn.className = "igcc-mini-btn";
+        copyOneBtn.textContent = "Copy CSV";
+        copyOneBtn.addEventListener("click", (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          copyText(item.csv_line, copyOneBtn, "Copied");
+        });
+        actions.appendChild(copyOneBtn);
+        card.appendChild(actions);
+      }
+
+      drawerBody.appendChild(card);
+    }
+  }
+
+  drawerCloseBtn.addEventListener("click", (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    drawer.classList.add("igcc-hidden");
+  });
+
+  copyAllBtn.addEventListener("click", (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (activeStudyResult && activeStudyResult.csv) {
+      copyText(activeStudyResult.csv, copyAllBtn, "Copied All");
+    }
+  });
+
+  dlCsvBtn.addEventListener("click", (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (activeStudyResult && activeStudyResult.csv) {
+      const code = activeStudyShortcode || `ig_${Date.now()}`;
+      triggerDownload(`${code}_anki.csv`, activeStudyResult.csv);
+    }
+  });
 
   function showToast(text, durationMs = 0) {
     toastText = text;
@@ -539,7 +737,7 @@
     const state = getKeyState(vKey);
 
     controls.style.top = `${Math.max(10, Math.round(r.top + 12))}px`;
-    controls.style.left = `${Math.max(10, Math.round(r.right - 92))}px`;
+    controls.style.left = `${Math.max(10, Math.round(r.right - 134))}px`;
     controls.classList.remove("igcc-hidden");
 
     ccBtn.textContent = state.loading ? "CC…" : "CC";
@@ -682,10 +880,56 @@
     }
   }
 
+  async function openStudyMiner() {
+    const v = currentVideo || pickPrimaryVideo();
+    const vKey = getVideoIdentity(v);
+    if (!v || !vKey) return;
+
+    drawer.classList.remove("igcc-hidden");
+    drawerBadge.textContent = "Analyzing…";
+    drawerBody.textContent = "";
+    const loadingEl = document.createElement("div");
+    loadingEl.className = "igcc-drawer-status";
+    loadingEl.textContent = "Transcribing & mining C1/C2 phrases and Anki cards…";
+    drawerBody.appendChild(loadingEl);
+
+    try {
+      const { data, shortcode, videoKey } = await ensureTranscribed(v);
+      const plainText =
+        Array.isArray(data.segments) && data.segments.length > 0
+          ? data.segments.map((s) => String(s.text || "").trim()).filter(Boolean).join("\n")
+          : String(data.text || "").trim();
+
+      const res = await chrome.runtime.sendMessage({
+        type: "IG_CC_MINE_CARDS",
+        videoKey,
+        text: plainText,
+        segments: data.segments || [],
+      });
+      if (!res || !res.ok) {
+        throw new Error((res && res.error) || "Card mining failed.");
+      }
+      renderStudyDrawer(res, shortcode);
+    } catch (err) {
+      drawerBadge.textContent = "Error";
+      drawerBody.textContent = "";
+      const errEl = document.createElement("div");
+      errEl.className = "igcc-drawer-status";
+      errEl.textContent = `Error: ${err.message}`;
+      drawerBody.appendChild(errEl);
+    }
+  }
+
   ccBtn.addEventListener("click", (e) => {
     e.preventDefault();
     e.stopPropagation();
     toggleCC();
+  });
+
+  aiBtn.addEventListener("click", (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    openStudyMiner();
   });
 
   dlBtn.addEventListener("click", (e) => {
@@ -695,13 +939,17 @@
   });
 
   document.addEventListener("keydown", (e) => {
-    if (e.key !== "c" && e.key !== "C") return;
     if (e.metaKey || e.ctrlKey || e.altKey) return;
     const tag = (e.target && e.target.tagName) || "";
     if (tag === "INPUT" || tag === "TEXTAREA" || (e.target && e.target.isContentEditable)) return;
-    if (currentVideo || pickPrimaryVideo()) {
+    if ((e.key === "c" || e.key === "C") && (currentVideo || pickPrimaryVideo())) {
       e.preventDefault();
       toggleCC();
+    } else if ((e.key === "a" || e.key === "A") && (currentVideo || pickPrimaryVideo())) {
+      e.preventDefault();
+      openStudyMiner();
+    } else if (e.key === "Escape" && !drawer.classList.contains("igcc-hidden")) {
+      drawer.classList.add("igcc-hidden");
     }
   });
 

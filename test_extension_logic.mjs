@@ -221,7 +221,7 @@ const EXT = path.join(__dirname, "extension");
   const audioUtilsCode = fs.readFileSync(path.join(EXT, "audio_utils.js"), "utf8");
   const offscreenCode = fs.readFileSync(path.join(EXT, "offscreen.js"), "utf8");
 
-  const store = { groqKeys: [], subtitleCacheV3: {} };
+  const store = { groqKeys: [], subtitleCacheV3: {}, studyCacheV1: {}, geminiApiKey: "", geminiModel: "" };
   let bgListener = null;
   let offscreenListener = null;
   let offscreenCreatedCount = 0;
@@ -285,6 +285,69 @@ const EXT = path.join(__dirname, "extension");
         json: async () => ({
           text: "Zero backend works cleanly.",
           segments: [{ start: 0.0, end: 2.1, text: "Zero backend works cleanly." }],
+        }),
+      };
+    }
+    if (url.startsWith("https://generativelanguage.googleapis.com/v1beta/models/")) {
+      if (url.includes("gemini-3.8-flash")) {
+        return { ok: false, status: 503, text: async () => "high demand" };
+      }
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          candidates: [
+            {
+              content: {
+                parts: [
+                  {
+                    text: JSON.stringify({
+                      items: [
+                        {
+                          term: "leave results on the table",
+                          category: "Idiom",
+                          meaning_zh: "白白错失本该拿到的收益",
+                          nuance_zh: "商业与健身高频隐喻",
+                          quote: "you are leaving results on the table",
+                          timestamp_sec: 4.2,
+                          anki_front: "情境：团队太保守。你说：“我们正在白白错失大好收益。” <br><br> **leave results on the table**",
+                          anki_back: "参考：We are leaving results on the table. <br><br> 地道商业隐喻。",
+                        },
+                      ],
+                    }),
+                  },
+                ],
+              },
+            },
+          ],
+        }),
+      };
+    }
+    if (url === "https://api.groq.com/openai/v1/chat/completions") {
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          choices: [
+            {
+              message: {
+                content: JSON.stringify({
+                  items: [
+                    {
+                      term: "cut corners",
+                      category: "Idiom",
+                      meaning_zh: "偷工减料",
+                      nuance_zh: "口语高频表达",
+                      quote: "never cut corners",
+                      timestamp_sec: 1.0,
+                      anki_front: "工程会上提醒团队。你说：“安全上绝不能偷工减料。” <br><br> cut corners",
+                      anki_back: "We can never cut corners on safety. <br><br> 强调不省步骤。",
+                    },
+                  ],
+                }),
+              },
+            },
+          ],
         }),
       };
     }
@@ -469,7 +532,35 @@ const EXT = path.join(__dirname, "extension");
   assert.equal(r3.ok, true);
   assert.equal(r3.cached, true);
   assert.equal(groqCallCount, 0);
-  console.log("[PASS] 3. background.js + offscreen.js: Fast-path skip, >24MB auto WAV extraction, OOM guard, SSRF, 429 rotation, race dedup & cache verified");
+
+  // 3g. AI Study & Anki Card Mining: Gemini 503 fallback to gemini-3.5-flash + zero-noise CSV sanitization + cache
+  store.geminiApiKey = "AQ.test_key";
+  store.geminiModel = "gemini-3.8-flash";
+  const studyRes = await sendMsg({
+    type: "IG_CC_MINE_CARDS",
+    videoKey: "sc:STUDY_1",
+    text: "a lot of people are leaving results on the table",
+    segments: [{ start: 4.2, end: 7.0, text: "a lot of people are leaving results on the table" }],
+  });
+  assert.equal(studyRes.ok, true);
+  assert.equal(studyRes.model, "gemini-3.5-flash", "Should auto-fallback from 503 gemini-3.8-flash to gemini-3.5-flash");
+  assert.equal(studyRes.items.length, 1);
+  assert.equal(studyRes.items[0].anki_front.includes("**"), false, "Markdown asterisks must be stripped from Anki CSV");
+  assert.equal(studyRes.items[0].anki_front.startsWith("情境："), false, "Prefix labels must be stripped from Anki CSV");
+  assert.match(studyRes.csv, /;We are leaving results on the table\./);
+
+  // 3h. Groq LLM fallback when no Gemini key is configured
+  store.geminiApiKey = "";
+  const groqStudyRes = await sendMsg({
+    type: "IG_CC_MINE_CARDS",
+    videoKey: "sc:STUDY_GROQ",
+    text: "never cut corners",
+    segments: [{ start: 1.0, end: 2.5, text: "never cut corners" }],
+  });
+  assert.equal(groqStudyRes.ok, true);
+  assert.match(groqStudyRes.model, /^groq\//);
+  assert.equal(groqStudyRes.items[0].term, "cut corners");
+  console.log("[PASS] 3. background.js + offscreen.js: Large-video WAV chunker, Gemini 503 fallback, Groq LLM fallback, Anki CSV sanitization & cache verified");
 }
 
 // --- Suite 4: content.js React DOM reuse isolation + bounded Map eviction ---
